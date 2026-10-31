@@ -122,7 +122,7 @@ export default function App() {
   const [viewInvoice, setViewInvoice] = useState(null);
 
   // Filter
-  const [invoiceFilter, setInvoiceFilter] = useState('pending'); // 'pending', 'all', 'confirmed', 'overdue', 'paid'
+  const [invoiceFilter, setInvoiceFilter] = useState('all'); // 'all', 'pending', 'overdue', 'paid'
   const [modalDiscountCode, setModalDiscountCode] = useState('');
 
   // Password complexity helpers
@@ -1012,27 +1012,23 @@ export default function App() {
                       +119% YTD
                     </span>
                   </div>
-                  {/* Visual SVG / HTML Bar Chart */}
-                  <div className="flex items-end justify-between h-40 pt-4 px-2 border-b border-slate-100">
+                  {/* Visual SVG / HTML Bar Chart with explicit pixel heights */}
+                  <div className="flex items-end justify-between h-48 pt-6 pb-2 px-3 border-b border-slate-100 bg-slate-50/50 rounded-xl mt-2">
                     {[
-                      { month: 'May', mrr: 3200, height: '45%' },
-                      { month: 'Jun', mrr: 4100, height: '58%' },
-                      { month: 'Jul', mrr: 4900, height: '70%' },
-                      { month: 'Aug', mrr: 5800, height: '82%' },
-                      { month: 'Sep', mrr: 6400, height: '91%' },
-                      { month: 'Oct', mrr: 7017, height: '100%' },
+                      { month: 'May', mrr: '₹3,200', barHeight: 55, color: 'bg-purple-300' },
+                      { month: 'Jun', mrr: '₹4,100', barHeight: 70, color: 'bg-purple-300' },
+                      { month: 'Jul', mrr: '₹4,900', barHeight: 88, color: 'bg-purple-400' },
+                      { month: 'Aug', mrr: '₹5,800', barHeight: 105, color: 'bg-purple-400' },
+                      { month: 'Sep', mrr: '₹6,400', barHeight: 122, color: 'bg-purple-500' },
+                      { month: 'Oct', mrr: '₹7,017', barHeight: 140, color: 'bg-odoo-primary shadow-lg ring-2 ring-purple-300' },
                     ].map((item, idx) => (
-                      <div key={idx} className="flex flex-col items-center gap-1.5 flex-1 group">
-                        <div className="text-[10px] font-bold text-slate-600 opacity-0 group-hover:opacity-100 transition">
-                          ₹{item.mrr}
-                        </div>
+                      <div key={idx} className="flex flex-col items-center justify-end h-full flex-1">
+                        <span className="text-[11px] font-extrabold text-slate-700 mb-1.5">{item.mrr}</span>
                         <div
-                          style={{ height: item.height }}
-                          className={`w-9 sm:w-12 rounded-t-lg transition-all duration-300 ${
-                            idx === 5 ? 'bg-odoo-primary shadow-md' : 'bg-purple-200 hover:bg-purple-300'
-                          }`}
+                          style={{ height: `${item.barHeight}px` }}
+                          className={`w-10 sm:w-14 rounded-t-lg transition-all duration-300 ${item.color}`}
                         />
-                        <span className="text-xs font-semibold text-slate-500 mt-1">{item.month}</span>
+                        <span className="text-xs font-bold text-slate-600 mt-2">{item.month}</span>
                       </div>
                     ))}
                   </div>
