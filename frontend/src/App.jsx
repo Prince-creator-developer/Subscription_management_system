@@ -732,6 +732,19 @@ export default function App() {
               {/* Top Banner Actions */}
               <div className="bg-gradient-to-r from-odoo-primary to-purple-900 rounded-2xl p-6 text-white shadow-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                 <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Live on Vercel
+                    </span>
+                    <a
+                      href="https://subscriptionmanagementsystem-gamma.vercel.app/"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] text-purple-200 hover:text-white underline flex items-center gap-1"
+                    >
+                      subscriptionmanagementsystem-gamma.vercel.app <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
                   <h1 className="text-2xl font-bold">Welcome, {user.full_name}</h1>
                   <p className="text-purple-200 text-sm mt-1">
                     {user.role === 'customer'
