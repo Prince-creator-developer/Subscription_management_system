@@ -412,7 +412,6 @@ def create_subscription(
     sub_num = f"SUB-2026-{count:04d}"
 
     start_d = payload.start_date or date.today()
-    # Compute expiry date based on plan billing frequency if not passed
     expiry_d = payload.expiry_date
     if not expiry_d:
         if plan.billing_frequency == "daily":
@@ -424,6 +423,17 @@ def create_subscription(
         else:
             expiry_d = start_d + timedelta(days=30)
 
+    # Check and link discount rule if provided
+    discount_id = None
+    if payload.applied_discount_code:
+        disc_rule = db.query(models.DiscountRule).filter(
+            models.DiscountRule.code == payload.applied_discount_code.strip().upper(),
+            models.DiscountRule.is_active == True
+        ).first()
+        if disc_rule:
+            discount_id = disc_rule.id
+            disc_rule.times_used += 1
+
     sub = models.Subscription(
         subscription_number=sub_num,
         customer_id=payload.customer_id,
@@ -434,6 +444,7 @@ def create_subscription(
         next_billing_date=start_d,
         payment_terms=payload.payment_terms,
         auto_close=payload.auto_close or plan.auto_close,
+        applied_discount_id=discount_id,
         notes=payload.notes
     )
     db.add(sub)
@@ -451,7 +462,9 @@ def create_subscription(
             if variant:
                 unit_price += variant.price_extra
 
-        subtotal = (unit_price * item.quantity) - (item.discount_amount or 0.0)
+        disc_amt = item.discount_amount or 0.0
+        line_subtotal = max(0.0, (unit_price * item.quantity) - disc_amt)
+
         line = models.SubscriptionLine(
             subscription_id=sub.id,
             product_id=prod.id,
@@ -459,8 +472,8 @@ def create_subscription(
             quantity=item.quantity,
             unit_price=unit_price,
             tax_rate=item.tax_rate or 18.0,
-            discount_amount=item.discount_amount or 0.0,
-            subtotal=max(0.0, subtotal)
+            discount_amount=disc_amt,
+            subtotal=round(line_subtotal, 2)
         )
         db.add(line)
 
@@ -553,9 +566,24 @@ def trigger_automated_billing(
 
         due_d = target_date + timedelta(days=terms_days)
 
-        subtotal = sum(line.subtotal for line in sub.lines)
-        tax_amount = sum((line.subtotal * (line.tax_rate / 100.0)) for line in sub.lines)
-        total_amount = subtotal + tax_amount
+        gross_subtotal = sum(line.unit_price * line.quantity for line in sub.lines)
+        line_discounts = sum(line.discount_amount for line in sub.lines)
+
+        # Check if subscription has active linked discount rule
+        sub_discount = 0.0
+        if sub.discount and sub.discount.is_active:
+            rule = sub.discount
+            today = target_date
+            if (not rule.end_date or today <= rule.end_date) and (not rule.max_usage_limit or rule.times_used <= rule.max_usage_limit):
+                if rule.discount_type == models.DiscountType.PERCENTAGE.value:
+                    sub_discount = round(gross_subtotal * (rule.value / 100.0), 2)
+                else:
+                    sub_discount = min(gross_subtotal, rule.value)
+
+        total_discount = max(line_discounts, sub_discount)
+        net_subtotal = round(max(0.0, gross_subtotal - total_discount), 2)
+        tax_amount = round(net_subtotal * 0.18, 2)
+        total_amount = round(net_subtotal + tax_amount, 2)
 
         invoice = models.Invoice(
             invoice_number=inv_num,
@@ -564,9 +592,9 @@ def trigger_automated_billing(
             status=models.InvoiceStatus.CONFIRMED.value,
             issue_date=target_date,
             due_date=due_d,
-            subtotal=round(subtotal, 2),
+            subtotal=round(gross_subtotal, 2),
             tax_amount=round(tax_amount, 2),
-            discount_amount=0.0,
+            discount_amount=round(total_discount, 2),
             total_amount=round(total_amount, 2),
             amount_paid=0.0,
             balance_due=round(total_amount, 2),
@@ -717,15 +745,78 @@ def record_payment(
     )
     db.add(payment)
 
-    # Reconcile invoice balance
-    invoice.amount_paid += payload.amount
-    invoice.balance_due = max(0.0, invoice.total_amount - invoice.amount_paid)
-    if invoice.balance_due <= 0.0:
+    # Reconcile invoice balance with strict float precision
+    invoice.amount_paid = round(invoice.amount_paid + payload.amount, 2)
+    invoice.balance_due = round(max(0.0, invoice.total_amount - invoice.amount_paid), 2)
+    if invoice.balance_due <= 0.01:
+        invoice.balance_due = 0.0
         invoice.status = models.InvoiceStatus.PAID.value
 
     db.commit()
     db.refresh(payment)
     return payment
+
+@app.delete("/api/invoices/{invoice_id}")
+def delete_invoice(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_staff_or_admin)
+):
+    """Allow staff or admin to remove / cancel an invoice from the system"""
+    invoice = db.query(models.Invoice).filter(models.Invoice.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    
+    # Delete associated payments and lines
+    db.query(models.Payment).filter(models.Payment.invoice_id == invoice.id).delete()
+    db.query(models.InvoiceLine).filter(models.InvoiceLine.invoice_id == invoice.id).delete()
+    db.delete(invoice)
+    db.commit()
+    return {"message": f"Invoice {invoice.invoice_number} deleted from system", "deleted_id": invoice_id}
+
+@app.post("/api/invoices/{invoice_id}/apply-discount")
+def apply_invoice_discount(
+    invoice_id: int,
+    discount_code: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_staff_or_admin)
+):
+    """Apply discount code directly to an unpaid invoice (Scene 5: Customer asks for a better price)"""
+    invoice = db.query(models.Invoice).filter(models.Invoice.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if invoice.status == models.InvoiceStatus.PAID.value:
+        raise HTTPException(status_code=400, detail="Cannot apply discount to already paid invoice")
+
+    rule = db.query(models.DiscountRule).filter(
+        models.DiscountRule.code == discount_code.strip().upper(),
+        models.DiscountRule.is_active == True
+    ).first()
+    if not rule:
+        raise HTTPException(status_code=404, detail="Invalid discount rule")
+
+    disc_amount = 0.0
+    if rule.discount_type == models.DiscountType.PERCENTAGE.value:
+        disc_amount = round(invoice.subtotal * (rule.value / 100.0), 2)
+    else:
+        disc_amount = min(invoice.subtotal, rule.value)
+
+    invoice.discount_amount = disc_amount
+    net = max(0.0, invoice.subtotal - disc_amount)
+    invoice.tax_amount = round(net * 0.18, 2)
+    invoice.total_amount = round(net + invoice.tax_amount, 2)
+    invoice.balance_due = round(max(0.0, invoice.total_amount - invoice.amount_paid), 2)
+    if invoice.balance_due <= 0.01:
+        invoice.balance_due = 0.0
+        invoice.status = models.InvoiceStatus.PAID.value
+
+    rule.times_used += 1
+    db.commit()
+    return {
+        "message": f"Discount {rule.code} applied: -₹{disc_amount}",
+        "new_total": invoice.total_amount,
+        "new_balance": invoice.balance_due
+    }
 
 # ==========================================
 # 8. FINANCE LEAD REPORTING & ANALYTICS (<2s)
