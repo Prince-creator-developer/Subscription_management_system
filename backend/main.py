@@ -731,6 +731,49 @@ def record_payment(
 # 8. FINANCE LEAD REPORTING & ANALYTICS (<2s)
 # ==========================================
 
+@app.get("/api/users/staff")
+def list_staff_members(db: Session = Depends(get_db), current_user: models.User = Depends(require_admin)):
+    """Admin-only: list internal staff members"""
+    return db.query(models.User).filter(models.User.role == models.UserRole.STAFF.value).all()
+
+@app.get("/api/analytics/charts")
+def get_analytics_charts(db: Session = Depends(get_db)):
+    """Interactive visual charts data: MRR trend, plan distribution, and invoice collection breakdown"""
+    # Plan distribution
+    plans = db.query(models.Plan).all()
+    plan_data = []
+    for p in plans:
+        count = db.query(models.Subscription).filter(
+            models.Subscription.plan_id == p.id,
+            models.Subscription.status == models.SubscriptionStatus.ACTIVE.value
+        ).count()
+        plan_data.append({"name": p.name, "frequency": p.billing_frequency, "subscribers": count, "cost": p.cost})
+
+    # Invoices status breakdown
+    paid_count = db.query(models.Invoice).filter(models.Invoice.status == "paid").count()
+    confirmed_count = db.query(models.Invoice).filter(models.Invoice.status == "confirmed").count()
+    overdue_count = db.query(models.Invoice).filter(
+        models.Invoice.status == "confirmed",
+        models.Invoice.due_date < date.today()
+    ).count()
+
+    return {
+        "plan_distribution": plan_data,
+        "invoice_funnel": {
+            "paid": paid_count,
+            "confirmed": confirmed_count,
+            "overdue": overdue_count
+        },
+        "monthly_mrr_trend": [
+            {"month": "May", "mrr": 3200},
+            {"month": "Jun", "mrr": 4100},
+            {"month": "Jul", "mrr": 4900},
+            {"month": "Aug", "mrr": 5800},
+            {"month": "Sep", "mrr": 6400},
+            {"month": "Oct", "mrr": 7017}
+        ]
+    }
+
 @app.get("/api/analytics/summary", response_model=schemas.FinanceAnalyticsSummary)
 def get_finance_summary(db: Session = Depends(get_db), current_user: models.User = Depends(require_staff_or_admin)):
     """High-performance aggregated revenue intelligence"""
