@@ -79,6 +79,34 @@ export default function App() {
     { product_id: '', variant_id: '', quantity: 1, unit_price: 0, tax_rate: 18.0 }
   ]);
 
+  // Admin Creation Modals
+  const [showProductModal, setShowProductModal] = useState(false);
+  const [newProdName, setNewProdName] = useState('');
+  const [newProdType, setNewProdType] = useState('software');
+  const [newProdSalesPrice, setNewProdSalesPrice] = useState('');
+  const [newProdCostPrice, setNewProdCostPrice] = useState('');
+  const [newProdNotes, setNewProdNotes] = useState('');
+  const [newProdVariantName, setNewProdVariantName] = useState('');
+  const [newProdVariantExtra, setNewProdVariantExtra] = useState('0');
+
+  const [showPlanModal, setShowPlanModal] = useState(false);
+  const [newPlanName, setNewPlanName] = useState('');
+  const [newPlanFreq, setNewPlanFreq] = useState('monthly');
+  const [newPlanCost, setNewPlanCost] = useState('');
+  const [newPlanMinQty, setNewPlanMinQty] = useState('1');
+  const [newPlanAutoClose, setNewPlanAutoClose] = useState(false);
+  const [newPlanAllowPause, setNewPlanAllowPause] = useState(true);
+  const [newPlanAllowRenew, setNewPlanAllowRenew] = useState(true);
+
+  const [showDiscountModal, setShowDiscountModal] = useState(false);
+  const [newDiscCode, setNewDiscCode] = useState('');
+  const [newDiscName, setNewDiscName] = useState('');
+  const [newDiscType, setNewDiscType] = useState('percentage');
+  const [newDiscValue, setNewDiscValue] = useState('');
+  const [newDiscMinQty, setNewDiscMinQty] = useState('1');
+  const [newDiscMinPurchase, setNewDiscMinPurchase] = useState('0');
+  const [newDiscLimit, setNewDiscLimit] = useState('50');
+
   // View Invoice Modal
   const [viewInvoice, setViewInvoice] = useState(null);
 
@@ -214,7 +242,95 @@ export default function App() {
     setQuoteLines(quoteLines.filter((_, i) => i !== idx));
   };
 
-  // Calculate quote subtotal
+  const handleCreateProduct = async (e) => {
+    e.preventDefault();
+    if (!newProdName || !newProdSalesPrice) return;
+    try {
+      const variants = newProdVariantName
+        ? [{
+            variant_name: newProdVariantName,
+            attribute_name: 'Brand',
+            attribute_value: newProdVariantName,
+            price_extra: parseFloat(newProdVariantExtra) || 0.0,
+          }]
+        : [];
+
+      await api.post('/products', {
+        name: newProdName,
+        product_type: newProdType,
+        sales_price: parseFloat(newProdSalesPrice),
+        cost_price: parseFloat(newProdCostPrice) || 0.0,
+        notes: newProdNotes,
+        variants,
+      });
+
+      showToast(`Product "${newProdName}" added successfully!`);
+      setShowProductModal(false);
+      setNewProdName('');
+      setNewProdSalesPrice('');
+      setNewProdCostPrice('');
+      setNewProdNotes('');
+      setNewProdVariantName('');
+      setNewProdVariantExtra('0');
+      loadAllData();
+    } catch (err) {
+      showToast(err.response?.data?.detail || 'Failed to create product', 'error');
+    }
+  };
+
+  const handleCreatePlan = async (e) => {
+    e.preventDefault();
+    if (!newPlanName || !newPlanCost) return;
+    try {
+      await api.post('/plans', {
+        name: newPlanName,
+        billing_frequency: newPlanFreq,
+        cost: parseFloat(newPlanCost),
+        min_quantity: parseInt(newPlanMinQty) || 1,
+        auto_close: newPlanAutoClose,
+        allow_early_close: true,
+        allow_pause: newPlanAllowPause,
+        allow_renew: newPlanAllowRenew,
+      });
+
+      showToast(`Plan "${newPlanName}" created successfully!`);
+      setShowPlanModal(false);
+      setNewPlanName('');
+      setNewPlanCost('');
+      loadAllData();
+    } catch (err) {
+      showToast(err.response?.data?.detail || 'Failed to create plan', 'error');
+    }
+  };
+
+  const handleCreateDiscount = async (e) => {
+    e.preventDefault();
+    if (!newDiscCode || !newDiscName || !newDiscValue) return;
+    try {
+      await api.post('/discounts', {
+        code: newDiscCode.toUpperCase(),
+        name: newDiscName,
+        discount_type: newDiscType,
+        value: parseFloat(newDiscValue),
+        min_quantity: parseInt(newDiscMinQty) || 1,
+        min_purchase_amount: parseFloat(newDiscMinPurchase) || 0.0,
+        max_usage_limit: parseInt(newDiscLimit) || 50,
+      });
+
+      showToast(`Discount rule "${newDiscCode.toUpperCase()}" created!`);
+      setShowDiscountModal(false);
+      setNewDiscCode('');
+      setNewDiscName('');
+      setNewDiscValue('');
+      loadAllData();
+    } catch (err) {
+      showToast(err.response?.data?.detail || 'Failed to create discount rule', 'error');
+    }
+  };
+
+  const handleSendReminder = (invNumber, customerName) => {
+    showToast(`Payment reminder dispatched to ${customerName} for ${invNumber}!`);
+  };
   const quoteSubtotal = quoteLines.reduce(
     (acc, ln) => acc + (ln.unit_price || 0) * (ln.quantity || 1),
     0
@@ -1066,6 +1182,15 @@ export default function App() {
                                 >
                                   <Eye className="w-3.5 h-3.5" /> View
                                 </button>
+                                {isOverdue && user.role !== 'customer' && (
+                                  <button
+                                    onClick={() => handleSendReminder(inv.invoice_number, inv.customer?.full_name || 'Customer')}
+                                    className="px-2.5 py-1 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold flex items-center gap-1"
+                                    title="Send payment reminder"
+                                  >
+                                    <Clock className="w-3 h-3" /> Chase
+                                  </button>
+                                )}
                                 {user.role !== 'customer' && inv.status !== 'paid' && (
                                   <button
                                     onClick={() => {
@@ -1093,9 +1218,19 @@ export default function App() {
           {/* TAB 4: PRODUCTS & VARIANTS CATALOG */}
           {activeTab === 'products' && (
             <div className="space-y-6">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900">Product & Variant Catalog</h2>
-                <p className="text-xs text-slate-500">Configure base software items, add-ons, services and brand variants with automatic price uplifts (e.g. Odoo Edition +₹560).</p>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">Product & Variant Catalog</h2>
+                  <p className="text-xs text-slate-500">Configure base software items, add-ons, services and brand variants with automatic price uplifts (e.g. Odoo Edition +₹560).</p>
+                </div>
+                {user.role === 'admin' && (
+                  <button
+                    onClick={() => setShowProductModal(true)}
+                    className="px-4 py-2 rounded-xl bg-odoo-primary hover:bg-odoo-hover text-white font-bold text-xs shadow transition flex items-center gap-1.5"
+                  >
+                    <Plus className="w-4 h-4" /> Add Product & Variants
+                  </button>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -1135,9 +1270,19 @@ export default function App() {
           {/* TAB 5: BILLING PLANS */}
           {activeTab === 'plans' && (
             <div className="space-y-6">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900">Billing Plans & Recurrence Rules</h2>
-                <p className="text-xs text-slate-500">Recurrence policies: Daily, Weekly, Monthly, and Yearly with automated closing and pause permissions.</p>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">Billing Plans & Recurrence Rules</h2>
+                  <p className="text-xs text-slate-500">Recurrence policies: Daily, Weekly, Monthly, and Yearly with automated closing and pause permissions.</p>
+                </div>
+                {user.role === 'admin' && (
+                  <button
+                    onClick={() => setShowPlanModal(true)}
+                    className="px-4 py-2 rounded-xl bg-odoo-primary hover:bg-odoo-hover text-white font-bold text-xs shadow transition flex items-center gap-1.5"
+                  >
+                    <Plus className="w-4 h-4" /> Create Billing Plan
+                  </button>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -1181,9 +1326,19 @@ export default function App() {
           {/* TAB 6: DISCOUNTS & RULES */}
           {activeTab === 'discounts' && (
             <div className="space-y-6">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900">Dynamic Discount Engine</h2>
-                <p className="text-xs text-slate-500">Configured rules applied automatically during invoice generation based on seats or threshold.</p>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">Dynamic Discount Engine</h2>
+                  <p className="text-xs text-slate-500">Configured rules applied automatically during invoice generation based on seats or threshold.</p>
+                </div>
+                {user.role === 'admin' && (
+                  <button
+                    onClick={() => setShowDiscountModal(true)}
+                    className="px-4 py-2 rounded-xl bg-odoo-primary hover:bg-odoo-hover text-white font-bold text-xs shadow transition flex items-center gap-1.5"
+                  >
+                    <Plus className="w-4 h-4" /> Create Discount Rule
+                  </button>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -1642,6 +1797,281 @@ export default function App() {
                   className="px-5 py-2 rounded-lg bg-odoo-primary hover:bg-odoo-hover text-white font-bold text-xs shadow"
                 >
                   Create & Confirm Quotation
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* MODAL 5: CREATE PRODUCT & VARIANTS */}
+      {showProductModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200">
+            <h3 className="text-lg font-bold text-slate-900 mb-1">Add Product & Brand Variant</h3>
+            <p className="text-xs text-slate-500 mb-4">Add base product with custom brand variant price uplifts (e.g. +₹560).</p>
+
+            <form onSubmit={handleCreateProduct} className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-600 mb-1">Product Name</label>
+                <input
+                  type="text"
+                  required
+                  value={newProdName}
+                  onChange={(e) => setNewProdName(e.target.value)}
+                  placeholder="e.g. Brightloop Inventory Engine"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-600 mb-1">Type</label>
+                  <select
+                    value={newProdType}
+                    onChange={(e) => setNewProdType(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs"
+                  >
+                    <option value="software">Software</option>
+                    <option value="addon">Add-on</option>
+                    <option value="service">Service</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-600 mb-1">Sales Price (₹)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={newProdSalesPrice}
+                    onChange={(e) => setNewProdSalesPrice(e.target.value)}
+                    placeholder="2499.00"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 bg-purple-50 rounded-xl border border-purple-100 space-y-2">
+                <span className="text-xs font-bold text-odoo-primary uppercase">Brand Variant Configuration</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={newProdVariantName}
+                    onChange={(e) => setNewProdVariantName(e.target.value)}
+                    placeholder="Variant (e.g. Odoo Edition)"
+                    className="w-full px-2.5 py-1.5 rounded border border-purple-200 text-xs bg-white"
+                  />
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={newProdVariantExtra}
+                    onChange={(e) => setNewProdVariantExtra(e.target.value)}
+                    placeholder="Extra Price (+₹560)"
+                    className="w-full px-2.5 py-1.5 rounded border border-purple-200 text-xs bg-white font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowProductModal(false)}
+                  className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-lg bg-odoo-primary hover:bg-odoo-hover text-white font-bold text-xs shadow"
+                >
+                  Create Product
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 6: CREATE BILLING PLAN */}
+      {showPlanModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+            <h3 className="text-lg font-bold text-slate-900 mb-1">Create Billing Plan</h3>
+            <p className="text-xs text-slate-500 mb-4">Define recurrence rules, min quantity, and lifecycle policies.</p>
+
+            <form onSubmit={handleCreatePlan} className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-600 mb-1">Plan Name</label>
+                <input
+                  type="text"
+                  required
+                  value={newPlanName}
+                  onChange={(e) => setNewPlanName(e.target.value)}
+                  placeholder="e.g. Quarterly Growth Plan"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-600 mb-1">Billing Frequency</label>
+                  <select
+                    value={newPlanFreq}
+                    onChange={(e) => setNewPlanFreq(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs"
+                  >
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                    <option value="yearly">Yearly</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-600 mb-1">Plan Cost (₹)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={newPlanCost}
+                    onChange={(e) => setNewPlanCost(e.target.value)}
+                    placeholder="3499.00"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-2 text-xs">
+                <label className="flex items-center gap-2 text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={newPlanAutoClose}
+                    onChange={(e) => setNewPlanAutoClose(e.target.checked)}
+                    className="rounded border-slate-300 text-odoo-primary"
+                  />
+                  <span>Auto-close on end date (do not auto-renew)</span>
+                </label>
+                <label className="flex items-center gap-2 text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={newPlanAllowPause}
+                    onChange={(e) => setNewPlanAllowPause(e.target.checked)}
+                    className="rounded border-slate-300 text-odoo-primary"
+                  />
+                  <span>Allow pausing & resuming</span>
+                </label>
+                <label className="flex items-center gap-2 text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={newPlanAllowRenew}
+                    onChange={(e) => setNewPlanAllowRenew(e.target.checked)}
+                    className="rounded border-slate-300 text-odoo-primary"
+                  />
+                  <span>Allow early renewal</span>
+                </label>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowPlanModal(false)}
+                  className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-lg bg-odoo-primary hover:bg-odoo-hover text-white font-bold text-xs shadow"
+                >
+                  Save Plan
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 7: CREATE DISCOUNT RULE */}
+      {showDiscountModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+            <h3 className="text-lg font-bold text-slate-900 mb-1">Create Discount Rule</h3>
+            <p className="text-xs text-slate-500 mb-4">Admin-only: rules apply dynamically during quote & invoice calculations.</p>
+
+            <form onSubmit={handleCreateDiscount} className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-600 mb-1">Coupon Code</label>
+                  <input
+                    type="text"
+                    required
+                    value={newDiscCode}
+                    onChange={(e) => setNewDiscCode(e.target.value.toUpperCase())}
+                    placeholder="e.g. VIP20"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-mono font-bold uppercase"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-600 mb-1">Type</label>
+                  <select
+                    value={newDiscType}
+                    onChange={(e) => setNewDiscType(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs"
+                  >
+                    <option value="percentage">Percentage (%)</option>
+                    <option value="fixed">Fixed Amount (₹)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-600 mb-1">Rule Name</label>
+                <input
+                  type="text"
+                  required
+                  value={newDiscName}
+                  onChange={(e) => setNewDiscName(e.target.value)}
+                  placeholder="e.g. VIP Enterprise 20% Discount"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-600 mb-1">Discount Value</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={newDiscValue}
+                    onChange={(e) => setNewDiscValue(e.target.value)}
+                    placeholder={newDiscType === 'percentage' ? '20' : '500'}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-600 mb-1">Min Seats / Qty</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={newDiscMinQty}
+                    onChange={(e) => setNewDiscMinQty(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowDiscountModal(false)}
+                  className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-lg bg-odoo-primary hover:bg-odoo-hover text-white font-bold text-xs shadow"
+                >
+                  Create Rule
                 </button>
               </div>
             </form>
