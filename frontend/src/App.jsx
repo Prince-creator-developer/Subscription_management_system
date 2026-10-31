@@ -65,6 +65,20 @@ export default function App() {
   const [paymentRef, setPaymentRef] = useState('');
   const [paymentNote, setPaymentNote] = useState('');
 
+  // New Quote / Subscription Builder Modal States
+  const [showQuoteModal, setShowQuoteModal] = useState(false);
+  const [customers, setCustomers] = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [quoteCustomer, setQuoteCustomer] = useState('');
+  const [quotePlan, setQuotePlan] = useState('');
+  const [quoteTerms, setQuoteTerms] = useState('Net 30');
+  const [quoteDiscountCode, setQuoteDiscountCode] = useState('');
+  const [appliedDiscount, setAppliedDiscount] = useState(null);
+  const [discountError, setDiscountError] = useState('');
+  const [quoteLines, setQuoteLines] = useState([
+    { product_id: '', variant_id: '', quantity: 1, unit_price: 0, tax_rate: 18.0 }
+  ]);
+
   // View Invoice Modal
   const [viewInvoice, setViewInvoice] = useState(null);
 
@@ -113,13 +127,15 @@ export default function App() {
   const loadAllData = async () => {
     setLoadingData(true);
     try {
-      const [sumRes, subsRes, prodsRes, plansRes, invsRes, discRes] = await Promise.all([
+      const [sumRes, subsRes, prodsRes, plansRes, invsRes, discRes, custsRes, tmplRes] = await Promise.all([
         api.get('/analytics/summary').catch(() => ({ data: null })),
         api.get('/subscriptions').catch(() => ({ data: [] })),
         api.get('/products').catch(() => ({ data: [] })),
         api.get('/plans').catch(() => ({ data: [] })),
         api.get('/invoices').catch(() => ({ data: [] })),
-        api.get('/discounts').catch(() => ({ data: [] }))
+        api.get('/discounts').catch(() => ({ data: [] })),
+        api.get('/users/customers').catch(() => ({ data: [] })),
+        api.get('/templates').catch(() => ({ data: [] })),
       ]);
       setSummary(sumRes.data);
       setSubscriptions(subsRes.data);
@@ -127,10 +143,139 @@ export default function App() {
       setPlans(plansRes.data);
       setInvoices(invsRes.data);
       setDiscounts(discRes.data);
+      setCustomers(custsRes.data);
+      setTemplates(tmplRes.data);
+      if (custsRes.data.length > 0 && !quoteCustomer) setQuoteCustomer(custsRes.data[0].id);
+      if (plansRes.data.length > 0 && !quotePlan) setQuotePlan(plansRes.data[0].id);
     } catch (error) {
       console.error("Error loading data:", error);
     } finally {
       setLoadingData(false);
+    }
+  };
+
+  const handleApplyTemplate = (tmplId) => {
+    const tmpl = templates.find((t) => t.id === parseInt(tmplId));
+    if (!tmpl) return;
+    if (tmpl.plan_id) setQuotePlan(tmpl.plan_id);
+    if (tmpl.lines && tmpl.lines.length > 0) {
+      setQuoteLines(
+        tmpl.lines.map((l) => ({
+          product_id: l.product_id,
+          variant_id: l.variant_id || '',
+          quantity: l.quantity || 1,
+          unit_price: l.unit_price,
+          tax_rate: 18.0,
+        }))
+      );
+    }
+    showToast(`Template "${tmpl.name}" applied!`);
+  };
+
+  const handleProductChange = (index, prodId) => {
+    const prod = products.find((p) => p.id === parseInt(prodId));
+    const newLines = [...quoteLines];
+    if (prod) {
+      newLines[index].product_id = prod.id;
+      newLines[index].variant_id = '';
+      newLines[index].unit_price = prod.sales_price;
+    } else {
+      newLines[index].product_id = '';
+      newLines[index].variant_id = '';
+      newLines[index].unit_price = 0;
+    }
+    setQuoteLines(newLines);
+  };
+
+  const handleVariantChange = (index, variantId) => {
+    const newLines = [...quoteLines];
+    const line = newLines[index];
+    const prod = products.find((p) => p.id === parseInt(line.product_id));
+    if (!prod) return;
+    line.variant_id = variantId;
+    let basePrice = prod.sales_price;
+    if (variantId) {
+      const v = prod.variants.find((vr) => vr.id === parseInt(variantId));
+      if (v) basePrice += v.price_extra;
+    }
+    line.unit_price = basePrice;
+    setQuoteLines(newLines);
+  };
+
+  const handleAddLine = () => {
+    setQuoteLines([
+      ...quoteLines,
+      { product_id: '', variant_id: '', quantity: 1, unit_price: 0, tax_rate: 18.0 },
+    ]);
+  };
+
+  const handleRemoveLine = (idx) => {
+    if (quoteLines.length === 1) return;
+    setQuoteLines(quoteLines.filter((_, i) => i !== idx));
+  };
+
+  // Calculate quote subtotal
+  const quoteSubtotal = quoteLines.reduce(
+    (acc, ln) => acc + (ln.unit_price || 0) * (ln.quantity || 1),
+    0
+  );
+  const quoteTotalQty = quoteLines.reduce((acc, ln) => acc + (parseInt(ln.quantity) || 1), 0);
+
+  const handleValidateDiscount = async () => {
+    if (!quoteDiscountCode) return;
+    setDiscountError('');
+    try {
+      const res = await api.post(
+        `/discounts/validate?code=${encodeURIComponent(quoteDiscountCode)}&subtotal=${quoteSubtotal}&quantity=${quoteTotalQty}`
+      );
+      setAppliedDiscount(res.data);
+      showToast(`Discount "${res.data.name}" applied: -₹${res.data.discount_amount}`);
+    } catch (err) {
+      setAppliedDiscount(null);
+      setDiscountError(err.response?.data?.detail || 'Invalid or ineligible discount rule');
+    }
+  };
+
+  const handleCreateQuotation = async (e) => {
+    e.preventDefault();
+    if (!quoteCustomer || !quotePlan) {
+      showToast('Please select customer and plan', 'error');
+      return;
+    }
+    const validLines = quoteLines.filter((l) => l.product_id);
+    if (validLines.length === 0) {
+      showToast('Please add at least one product line', 'error');
+      return;
+    }
+
+    try {
+      const discountPerLine = appliedDiscount
+        ? appliedDiscount.discount_amount / validLines.length
+        : 0.0;
+
+      await api.post('/subscriptions', {
+        customer_id: parseInt(quoteCustomer),
+        plan_id: parseInt(quotePlan),
+        payment_terms: quoteTerms,
+        applied_discount_code: appliedDiscount?.code,
+        lines: validLines.map((l) => ({
+          product_id: parseInt(l.product_id),
+          variant_id: l.variant_id ? parseInt(l.variant_id) : null,
+          quantity: parseInt(l.quantity) || 1,
+          tax_rate: 18.0,
+          discount_amount: discountPerLine,
+        })),
+      });
+
+      showToast('Quotation created successfully! Ready for customer review.');
+      setShowQuoteModal(false);
+      setAppliedDiscount(null);
+      setQuoteDiscountCode('');
+      setQuoteLines([{ product_id: '', variant_id: '', quantity: 1, unit_price: 0, tax_rate: 18.0 }]);
+      loadAllData();
+      setActiveTab('subscriptions');
+    } catch (err) {
+      showToast(err.response?.data?.detail || 'Failed to create quotation', 'error');
     }
   };
 
@@ -688,11 +833,20 @@ export default function App() {
           {/* TAB 2: SUBSCRIPTIONS & QUOTES */}
           {activeTab === 'subscriptions' && (
             <div className="space-y-6">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div>
                   <h2 className="text-xl font-bold text-slate-900">Subscriptions & Quotations</h2>
                   <p className="text-xs text-slate-500">Track and manage complete lifecycle from Draft to Active to Renewal.</p>
                 </div>
+                {user.role !== 'customer' && (
+                  <button
+                    onClick={() => setShowQuoteModal(true)}
+                    className="px-4 py-2 rounded-xl bg-odoo-primary hover:bg-odoo-hover text-white font-bold text-xs shadow transition flex items-center gap-1.5"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Create New Quotation
+                  </button>
+                )}
               </div>
 
               <div className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden shadow-sm">
@@ -1248,6 +1402,236 @@ export default function App() {
             >
               View Generated Invoices
             </button>
+          </div>
+        </div>
+      )}
+      {/* MODAL 4: CREATE QUOTATION / SUBSCRIPTION */}
+      {showQuoteModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-3xl w-full p-7 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between border-b pb-3 mb-5">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900">Prepare Subscription Quotation</h3>
+                <p className="text-xs text-slate-500">
+                  Select customer, pre-fill from quotation template, configure product lines and variant prices.
+                </p>
+              </div>
+              <button onClick={() => setShowQuoteModal(false)} className="p-1 rounded-lg hover:bg-slate-100">
+                <XCircle className="w-6 h-6 text-slate-400" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateQuotation} className="space-y-4">
+              {/* Template quick fill */}
+              {templates.length > 0 && (
+                <div className="bg-purple-50 p-3 rounded-xl border border-purple-200 text-xs flex items-center justify-between">
+                  <span className="font-semibold text-odoo-primary flex items-center gap-1.5">
+                    <FileText className="w-4 h-4" /> Start from Quotation Template:
+                  </span>
+                  <select
+                    onChange={(e) => handleApplyTemplate(e.target.value)}
+                    defaultValue=""
+                    className="px-2.5 py-1 bg-white border border-purple-300 rounded font-medium text-xs focus:ring-1 focus:ring-odoo-primary"
+                  >
+                    <option value="" disabled>Choose a template...</option>
+                    {templates.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name} (Valid {t.validity_days}d)</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Customer & Plan */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-600 mb-1">Customer</label>
+                  <select
+                    value={quoteCustomer}
+                    onChange={(e) => setQuoteCustomer(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs"
+                  >
+                    {customers.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.company_name ? `${c.company_name} (${c.full_name})` : c.full_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-600 mb-1">Billing Plan</label>
+                  <select
+                    value={quotePlan}
+                    onChange={(e) => setQuotePlan(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs"
+                  >
+                    {plans.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} (₹{p.cost} / {p.billing_frequency})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-600 mb-1">Payment Terms</label>
+                  <select
+                    value={quoteTerms}
+                    onChange={(e) => setQuoteTerms(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs"
+                  >
+                    <option value="Net 30">Net 30 (Default)</option>
+                    <option value="Net 15">Net 15</option>
+                    <option value="Due on Receipt">Due on Receipt</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Product Lines with Variant Pricing */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-xs font-bold uppercase text-slate-700">Order Lines & Variants</label>
+                  <button
+                    type="button"
+                    onClick={handleAddLine}
+                    className="text-xs text-odoo-secondary hover:underline font-bold flex items-center gap-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Add Product Line
+                  </button>
+                </div>
+
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                  {quoteLines.map((line, idx) => {
+                    const selProd = products.find((p) => p.id === parseInt(line.product_id));
+                    return (
+                      <div key={idx} className="p-2.5 rounded-lg border border-slate-200 bg-slate-50 flex items-center gap-2 text-xs">
+                        {/* Product */}
+                        <select
+                          value={line.product_id}
+                          onChange={(e) => handleProductChange(idx, e.target.value)}
+                          required
+                          className="flex-1 px-2.5 py-1.5 rounded border border-slate-300 bg-white"
+                        >
+                          <option value="">Select Product...</option>
+                          {products.map((p) => (
+                            <option key={p.id} value={p.id}>{p.name} (Base: ₹{p.sales_price})</option>
+                          ))}
+                        </select>
+
+                        {/* Variant */}
+                        <select
+                          value={line.variant_id}
+                          onChange={(e) => handleVariantChange(idx, e.target.value)}
+                          disabled={!selProd || !selProd.variants || selProd.variants.length === 0}
+                          className="w-44 px-2 py-1.5 rounded border border-slate-300 bg-white disabled:bg-slate-100 disabled:text-slate-400"
+                        >
+                          <option value="">No Variant</option>
+                          {selProd?.variants?.map((v) => (
+                            <option key={v.id} value={v.id}>
+                              {v.variant_name} {v.price_extra > 0 ? `(+₹${v.price_extra})` : ''}
+                            </option>
+                          ))}
+                        </select>
+
+                        {/* Qty */}
+                        <input
+                          type="number"
+                          min="1"
+                          value={line.quantity}
+                          onChange={(e) => {
+                            const newLines = [...quoteLines];
+                            newLines[idx].quantity = parseInt(e.target.value) || 1;
+                            setQuoteLines(newLines);
+                          }}
+                          className="w-16 px-2 py-1.5 rounded border border-slate-300 bg-white text-center"
+                        />
+
+                        {/* Total per line */}
+                        <div className="w-24 text-right font-bold text-slate-800">
+                          ₹{((line.unit_price || 0) * (line.quantity || 1)).toLocaleString()}
+                        </div>
+
+                        {/* Delete line */}
+                        {quoteLines.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveLine(idx)}
+                            className="text-slate-400 hover:text-rose-600 p-1"
+                          >
+                            <XCircle className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Dynamic Discount Section */}
+              <div className="pt-2 border-t border-slate-200">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={quoteDiscountCode}
+                    onChange={(e) => setQuoteDiscountCode(e.target.value.toUpperCase())}
+                    placeholder="Enter Discount Code (e.g. SEATS10, SAVE500)"
+                    className="flex-1 px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-mono font-bold uppercase"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleValidateDiscount}
+                    className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs"
+                  >
+                    Apply Discount
+                  </button>
+                </div>
+                {appliedDiscount && (
+                  <div className="mt-1.5 p-2 bg-emerald-50 border border-emerald-200 rounded text-xs text-emerald-800 flex justify-between font-medium">
+                    <span>Applied: {appliedDiscount.name} ({appliedDiscount.code})</span>
+                    <span>-₹{appliedDiscount.discount_amount}</span>
+                  </div>
+                )}
+                {discountError && (
+                  <div className="mt-1.5 p-2 bg-rose-50 border border-rose-200 rounded text-xs text-rose-700">
+                    {discountError}
+                  </div>
+                )}
+              </div>
+
+              {/* Totals Summary */}
+              <div className="bg-slate-50 p-3 rounded-xl text-xs space-y-1 text-right">
+                <div className="text-slate-600">Subtotal: <span className="font-bold">₹{quoteSubtotal.toLocaleString()}</span></div>
+                {appliedDiscount && (
+                  <div className="text-emerald-700 font-medium">
+                    Discount: -₹{appliedDiscount.discount_amount.toLocaleString()}
+                  </div>
+                )}
+                <div className="text-slate-600">
+                  Est. Taxes (GST 18%): <span className="font-bold">₹{Math.round(((appliedDiscount ? appliedDiscount.new_subtotal : quoteSubtotal) * 0.18)).toLocaleString()}</span>
+                </div>
+                <div className="text-base font-extrabold text-slate-900 pt-1 border-t">
+                  Estimated Total: ₹{Math.round(((appliedDiscount ? appliedDiscount.new_subtotal : quoteSubtotal) * 1.18)).toLocaleString()}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowQuoteModal(false)}
+                  className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-lg bg-odoo-primary hover:bg-odoo-hover text-white font-bold text-xs shadow"
+                >
+                  Create & Confirm Quotation
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
