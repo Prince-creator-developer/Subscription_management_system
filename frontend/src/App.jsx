@@ -107,6 +107,17 @@ export default function App() {
   const [newDiscMinPurchase, setNewDiscMinPurchase] = useState('0');
   const [newDiscLimit, setNewDiscLimit] = useState('50');
 
+  // Staff Management Modal
+  const [showStaffModal, setShowStaffModal] = useState(false);
+  const [newStaffEmail, setNewStaffEmail] = useState('');
+  const [newStaffPassword, setNewStaffPassword] = useState('');
+  const [newStaffName, setNewStaffName] = useState('');
+  const [newStaffPhone, setNewStaffPhone] = useState('');
+
+  // Interactive Search & Filters
+  const [subscriptionSearch, setSubscriptionSearch] = useState('');
+  const [subscriptionStatusFilter, setSubscriptionStatusFilter] = useState('all');
+
   // View Invoice Modal
   const [viewInvoice, setViewInvoice] = useState(null);
 
@@ -325,6 +336,27 @@ export default function App() {
       loadAllData();
     } catch (err) {
       showToast(err.response?.data?.detail || 'Failed to create discount rule', 'error');
+    }
+  };
+
+  const handleCreateStaff = async (e) => {
+    e.preventDefault();
+    if (!newStaffEmail || !newStaffPassword || !newStaffName) return;
+    try {
+      await api.post('/auth/staff', {
+        email: newStaffEmail,
+        password: newStaffPassword,
+        full_name: newStaffName,
+        phone: newStaffPhone,
+      });
+      showToast(`Staff member "${newStaffName}" created successfully!`);
+      setShowStaffModal(false);
+      setNewStaffEmail('');
+      setNewStaffPassword('');
+      setNewStaffName('');
+      setNewStaffPhone('');
+    } catch (err) {
+      showToast(err.response?.data?.detail || 'Failed to create staff member', 'error');
     }
   };
 
@@ -936,6 +968,89 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Interactive Visual Charts (MRR Trend & Recurrence Distribution) */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200/90 p-6 shadow-sm">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="font-bold text-slate-900 text-base">Monthly Recurring Revenue (MRR) Growth</h3>
+                      <p className="text-xs text-slate-500">6-Month trailing recurring expansion rate</p>
+                    </div>
+                    <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                      +119% YTD
+                    </span>
+                  </div>
+                  {/* Visual SVG / HTML Bar Chart */}
+                  <div className="flex items-end justify-between h-40 pt-4 px-2 border-b border-slate-100">
+                    {[
+                      { month: 'May', mrr: 3200, height: '45%' },
+                      { month: 'Jun', mrr: 4100, height: '58%' },
+                      { month: 'Jul', mrr: 4900, height: '70%' },
+                      { month: 'Aug', mrr: 5800, height: '82%' },
+                      { month: 'Sep', mrr: 6400, height: '91%' },
+                      { month: 'Oct', mrr: 7017, height: '100%' },
+                    ].map((item, idx) => (
+                      <div key={idx} className="flex flex-col items-center gap-1.5 flex-1 group">
+                        <div className="text-[10px] font-bold text-slate-600 opacity-0 group-hover:opacity-100 transition">
+                          ₹{item.mrr}
+                        </div>
+                        <div
+                          style={{ height: item.height }}
+                          className={`w-9 sm:w-12 rounded-t-lg transition-all duration-300 ${
+                            idx === 5 ? 'bg-odoo-primary shadow-md' : 'bg-purple-200 hover:bg-purple-300'
+                          }`}
+                        />
+                        <span className="text-xs font-semibold text-slate-500 mt-1">{item.month}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-2xl border border-slate-200/90 p-6 shadow-sm flex flex-col justify-between">
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-base">Plan Distribution</h3>
+                    <p className="text-xs text-slate-500 mb-4">Active subscriber contract mix</p>
+                    <div className="space-y-3 text-xs">
+                      <div>
+                        <div className="flex justify-between font-semibold text-slate-700 mb-1">
+                          <span>Monthly Pro Suite</span>
+                          <span className="font-bold text-odoo-primary">60%</span>
+                        </div>
+                        <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden">
+                          <div className="h-full bg-odoo-primary rounded-full" style={{ width: '60%' }} />
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex justify-between font-semibold text-slate-700 mb-1">
+                          <span>Yearly Enterprise Contract</span>
+                          <span className="font-bold text-odoo-secondary">30%</span>
+                        </div>
+                        <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden">
+                          <div className="h-full bg-odoo-secondary rounded-full" style={{ width: '30%' }} />
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex justify-between font-semibold text-slate-700 mb-1">
+                          <span>Daily Developer Sandbox</span>
+                          <span className="font-bold text-amber-500">10%</span>
+                        </div>
+                        <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden">
+                          <div className="h-full bg-amber-400 rounded-full" style={{ width: '10%' }} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  {user.role === 'admin' && (
+                    <button
+                      onClick={() => setShowStaffModal(true)}
+                      className="w-full py-2 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 font-bold text-xs text-slate-700 flex items-center justify-center gap-1.5 transition mt-4"
+                    >
+                      <UserCheck className="w-4 h-4 text-odoo-primary" /> Manage Staff Access
+                    </button>
+                  )}
+                </div>
+              </div>
+
               {/* Quick Pipeline Glance */}
               <div className="bg-white rounded-2xl border border-slate-200/90 p-6 shadow-sm">
                 <div className="flex items-center justify-between mb-4">
@@ -967,15 +1082,24 @@ export default function App() {
                   <h2 className="text-xl font-bold text-slate-900">Subscriptions & Quotations</h2>
                   <p className="text-xs text-slate-500">Track and manage complete lifecycle from Draft to Active to Renewal.</p>
                 </div>
-                {user.role !== 'customer' && (
-                  <button
-                    onClick={() => setShowQuoteModal(true)}
-                    className="px-4 py-2 rounded-xl bg-odoo-primary hover:bg-odoo-hover text-white font-bold text-xs shadow transition flex items-center gap-1.5"
-                  >
-                    <Plus className="w-4 h-4" />
-                    Create New Quotation
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={subscriptionSearch}
+                    onChange={(e) => setSubscriptionSearch(e.target.value)}
+                    placeholder="Search customer, number..."
+                    className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs bg-white"
+                  />
+                  {user.role !== 'customer' && (
+                    <button
+                      onClick={() => setShowQuoteModal(true)}
+                      className="px-4 py-2 rounded-xl bg-odoo-primary hover:bg-odoo-hover text-white font-bold text-xs shadow transition flex items-center gap-1.5"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Create New Quotation
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden shadow-sm">
@@ -992,7 +1116,18 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200/70">
-                      {subscriptions.map((sub) => (
+                      {subscriptions
+                        .filter((sub) => {
+                          if (!subscriptionSearch) return true;
+                          const q = subscriptionSearch.toLowerCase();
+                          return (
+                            sub.subscription_number.toLowerCase().includes(q) ||
+                            (sub.customer?.full_name || '').toLowerCase().includes(q) ||
+                            (sub.customer?.company_name || '').toLowerCase().includes(q) ||
+                            (sub.plan?.name || '').toLowerCase().includes(q)
+                          );
+                        })
+                        .map((sub) => (
                         <tr key={sub.id} className="hover:bg-slate-50/80 transition">
                           <td className="px-5 py-4 font-mono font-bold text-odoo-primary">
                             {sub.subscription_number}
@@ -2072,6 +2207,80 @@ export default function App() {
                   className="px-5 py-2 rounded-lg bg-odoo-primary hover:bg-odoo-hover text-white font-bold text-xs shadow"
                 >
                   Create Rule
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* MODAL 8: ADD STAFF MEMBER (ADMIN ONLY) */}
+      {showStaffModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+            <h3 className="text-lg font-bold text-slate-900 mb-1">Provision Staff Account</h3>
+            <p className="text-xs text-slate-500 mb-4">Scene 1 Rule: Only the Admin can create internal staff member accounts.</p>
+
+            <form onSubmit={handleCreateStaff} className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-600 mb-1">Full Name</label>
+                <input
+                  type="text"
+                  required
+                  value={newStaffName}
+                  onChange={(e) => setNewStaffName(e.target.value)}
+                  placeholder="e.g. Yash Sharma"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-600 mb-1">Staff Email</label>
+                <input
+                  type="email"
+                  required
+                  value={newStaffEmail}
+                  onChange={(e) => setNewStaffEmail(e.target.value)}
+                  placeholder="staff2@brightloop.com"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-600 mb-1">Initial Password</label>
+                <input
+                  type="password"
+                  required
+                  value={newStaffPassword}
+                  onChange={(e) => setNewStaffPassword(e.target.value)}
+                  placeholder="Must meet 4 security checks"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-600 mb-1">Phone (Optional)</label>
+                <input
+                  type="text"
+                  value={newStaffPhone}
+                  onChange={(e) => setNewStaffPhone(e.target.value)}
+                  placeholder="+91 9876543210"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowStaffModal(false)}
+                  className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-lg bg-odoo-primary hover:bg-odoo-hover text-white font-bold text-xs shadow"
+                >
+                  Create Staff Account
                 </button>
               </div>
             </form>
