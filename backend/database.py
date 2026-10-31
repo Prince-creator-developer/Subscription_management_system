@@ -2,7 +2,9 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./brightloop.db")
+# On Vercel serverless, root filesystem is read-only; use /tmp for SQLite
+DEFAULT_DB = "sqlite:////tmp/brightloop.db" if os.getenv("VERCEL") else "sqlite:///./brightloop.db"
+DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DB)
 
 engine = create_engine(
     DATABASE_URL,
@@ -20,3 +22,4 @@ def get_db():
         yield db
     finally:
         db.close()
+

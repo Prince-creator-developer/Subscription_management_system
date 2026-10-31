@@ -241,6 +241,87 @@ def create_plan(
 # 4. TAX RULES & DISCOUNT RULES
 # ==========================================
 
+@app.get("/api/users/customers")
+def list_customers(db: Session = Depends(get_db)):
+    """List customer accounts for quotation and subscription creation"""
+    return db.query(models.User).filter(models.User.role == models.UserRole.CUSTOMER.value).all()
+
+@app.get("/api/templates")
+def list_quotation_templates(db: Session = Depends(get_db)):
+    """List pre-configured quotation templates"""
+    templates = db.query(models.QuotationTemplate).all()
+    result = []
+    for t in templates:
+        result.append({
+            "id": t.id,
+            "name": t.name,
+            "validity_days": t.validity_days,
+            "plan_id": t.plan_id,
+            "plan_name": t.plan.name if t.plan else None,
+            "notes": t.notes,
+            "lines": [
+                {
+                    "product_id": l.product_id,
+                    "product_name": l.product.name if l.product else None,
+                    "variant_id": l.variant_id,
+                    "variant_name": l.variant.variant_name if l.variant else None,
+                    "quantity": l.quantity,
+                    "unit_price": l.unit_price
+                }
+                for l in t.lines
+            ]
+        })
+    return result
+
+@app.post("/api/discounts/validate")
+def validate_discount_code(
+    code: str,
+    subtotal: float,
+    quantity: int = 1,
+    db: Session = Depends(get_db)
+):
+    """
+    Validate discount code against rules:
+    - Checks start and end dates
+    - Checks minimum purchase value and min quantity
+    - Checks max usage limit
+    """
+    rule = db.query(models.DiscountRule).filter(
+        models.DiscountRule.code == code.upper(),
+        models.DiscountRule.is_active == True
+    ).first()
+
+    if not rule:
+        raise HTTPException(status_code=404, detail="Invalid discount code")
+
+    today = date.today()
+    if rule.start_date and today < rule.start_date:
+        raise HTTPException(status_code=400, detail="Discount code is not yet active")
+    if rule.end_date and today > rule.end_date:
+        raise HTTPException(status_code=400, detail="Discount code has expired")
+    if rule.max_usage_limit and rule.times_used >= rule.max_usage_limit:
+        raise HTTPException(status_code=400, detail="Discount code usage limit reached")
+    if quantity < rule.min_quantity:
+        raise HTTPException(status_code=400, detail=f"Requires minimum quantity of {rule.min_quantity} seats")
+    if subtotal < rule.min_purchase_amount:
+        raise HTTPException(status_code=400, detail=f"Requires minimum purchase of ₹{rule.min_purchase_amount}")
+
+    discount_amount = 0.0
+    if rule.discount_type == models.DiscountType.PERCENTAGE.value:
+        discount_amount = round(subtotal * (rule.value / 100.0), 2)
+    else:
+        discount_amount = min(subtotal, rule.value)
+
+    return {
+        "valid": True,
+        "code": rule.code,
+        "name": rule.name,
+        "discount_type": rule.discount_type,
+        "value": rule.value,
+        "discount_amount": discount_amount,
+        "new_subtotal": round(max(0.0, subtotal - discount_amount), 2)
+    }
+
 @app.get("/api/taxes", response_model=List[schemas.TaxRuleResponse])
 def list_tax_rules(db: Session = Depends(get_db)):
     return db.query(models.TaxRule).filter(models.TaxRule.is_active == True).all()
