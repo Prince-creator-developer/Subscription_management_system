@@ -4,6 +4,12 @@
 
 ---
 
+## 🌐 Live Production Deployment
+* **Live Web Platform:** [https://subscriptionmanagementsystem-gamma.vercel.app/](https://subscriptionmanagementsystem-gamma.vercel.app/)
+* **Vercel Multi-Service Deployment:** Configured via root `vercel.json` with reverse-proxy rewrites routing `/api/(.*)` to the Python backend and `/(.*)` to the Vite frontend.
+
+---
+
 ## 🚀 Overview
 Brightloop Software is an all-in-one subscription management and recurring billing platform engineered to automate the complete subscription lifecycle. It eliminates manual spreadsheets, missed renewals, double-invoicing, and scattered revenue tracking with an Odoo-inspired architecture.
 

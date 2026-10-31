@@ -623,6 +623,54 @@ def trigger_automated_billing(
 # 7. INVOICES & PAYMENTS LEDGER
 # ==========================================
 
+@app.get("/api/invoices/{invoice_id}/receipt")
+def get_invoice_receipt(invoice_id: int, db: Session = Depends(get_db)):
+    """Generate structured receipt data for printing and PDF generation"""
+    inv = db.query(models.Invoice).filter(models.Invoice.id == invoice_id).first()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    
+    payments = db.query(models.Payment).filter(models.Payment.invoice_id == inv.id).all()
+    
+    return {
+        "invoice_number": inv.invoice_number,
+        "issue_date": str(inv.issue_date),
+        "due_date": str(inv.due_date),
+        "customer_name": inv.customer.full_name,
+        "company_name": inv.customer.company_name or inv.customer.full_name,
+        "customer_email": inv.customer.email,
+        "payment_terms": inv.payment_terms,
+        "status": inv.status,
+        "subtotal": inv.subtotal,
+        "tax_amount": inv.tax_amount,
+        "discount_amount": inv.discount_amount,
+        "total_amount": inv.total_amount,
+        "amount_paid": inv.amount_paid,
+        "balance_due": inv.balance_due,
+        "lines": [
+            {
+                "product_name": l.product_name,
+                "variant_name": l.variant_name,
+                "quantity": l.quantity,
+                "unit_price": l.unit_price,
+                "tax_rate": l.tax_rate,
+                "tax_amount": l.tax_amount,
+                "total_amount": l.total_amount
+            }
+            for l in inv.lines
+        ],
+        "payments": [
+            {
+                "payment_number": p.payment_number,
+                "amount": p.amount,
+                "payment_method": p.payment_method,
+                "payment_date": str(p.payment_date),
+                "reference_id": p.reference_id
+            }
+            for p in payments
+        ]
+    }
+
 @app.get("/api/invoices", response_model=List[schemas.InvoiceResponse])
 def list_invoices(
     status: Optional[str] = None,
